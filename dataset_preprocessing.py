@@ -1,14 +1,16 @@
-import os
-
 import numpy as np
-from safetensors import torch
+import os
+from PIL import Image
+import matplotlib.pyplot as plt
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torchvision import transforms,datasets
 
 
 class Dataset(torch.utils.data.Dataset):
-
-    # torch.utils.data.Dataset 이라는 파이토치 base class를 상속받아
-    # 그 method인 __len__(), __getitem__()을 오버라이딩 해줘서
-    # 사용자 정의 Dataset class를 선언한다
 
     def __init__(self, data_dir, transform=None):
         self.data_dir = data_dir
@@ -54,5 +56,22 @@ class Dataset(torch.utils.data.Dataset):
         if self.transform:
             data = self.transform(data)
         # transform에 할당된 class 들이 호출되면서 __call__ 함수 실행
+
+        return data
+
+class ToTensor(object):
+    def __call__(self, data):
+        label, input = data['label'], data['input']
+
+        # numpy와 tensor의 배열 차원 순서가 다르다.
+        # numpy : (행, 열, 채널)
+        # tensor : (채널, 행, 열)
+        # 따라서 위 순서에 맞춰 transpose
+
+        label = label.transpose((2, 0, 1)).astype(np.float32)
+        input = input.transpose((2, 0, 1)).astype(np.float32)
+
+        # 이후 np를 tensor로 바꾸는 코드는 다음과 같이 간단하다.
+        data = {'label': torch.from_numpy(label), 'input': torch.from_numpy(input)}
 
         return data
