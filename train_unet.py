@@ -4,8 +4,6 @@ from curses.ascii import isdigit
 
 import Normalization
 import numpy as np
-from PIL import Image
-import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn

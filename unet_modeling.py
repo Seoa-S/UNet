@@ -5,7 +5,7 @@ class UNet(nn.Module):
     def __init__(self):
         super(UNet, self).__init__()
 
-        # Conv2D, BatchNorm2D, ReLU를 순서대로 쌓아놓은 함수
+        # Conv2D, BatchNorm2D, ReLU를 순서대로 쌓아 놓은 함수
         def CBR2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=True):
             layers = []
             layers += [nn.Conv2d(in_channels=in_channels, out_channels=out_channels,
@@ -62,6 +62,7 @@ class UNet(nn.Module):
         self.fc = nn.Conv2d(in_channels=64, out_channels=1, kernel_size=1, stride=1, padding=0, bias=True)
 
     def forward(self, x):
+        #Encoding Path
         enc1_1 = self.enc1_1(x)
         enc1_2 = self.enc1_2(enc1_1)
         pool1 = self.pool1(enc1_2)
@@ -80,6 +81,7 @@ class UNet(nn.Module):
 
         enc5_1 = self.enc5_1(pool4)
 
+        #Decoding Path
         dec5_1 = self.dec5_1(enc5_1)
 
         unpool4 = self.unpool4(dec5_1)
