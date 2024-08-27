@@ -11,53 +11,42 @@ from torchvision import transforms,datasets
 
 
 class Dataset(torch.utils.data.Dataset):
-
     def __init__(self, data_dir, transform=None):
         self.data_dir = data_dir
         self.transform = transform
-
-        lst_data = os.listdir(self.data_dir)
-
-        # 문자열 검사해서 'label'이 있으면 True
-        # 문자열 검사해서 'input'이 있으면 True
-        lst_label = [f for f in lst_data if f.startswith('label')]
-        lst_input = [f for f in lst_data if f.startswith('input')]
-
-        lst_label.sort()
-        lst_input.sort()
-
-        self.lst_label = lst_label
-        self.lst_input = lst_input
+        self.lst_input = sorted([f for f in os.listdir(data_dir) if 'input' in f])
+        self.lst_label = sorted([f for f in os.listdir(data_dir) if 'label' in f])
 
     def __len__(self):
-        return len(self.lst_label)
+        return len(self.lst_input)
 
-    # 여기가 데이터 load하는 파트
     def __getitem__(self, index):
         label = np.load(os.path.join(self.data_dir, self.lst_label[index]))
         inputs = np.load(os.path.join(self.data_dir, self.lst_input[index]))
 
-        # normalize, 이미지는 0~255 값을 가지고 있어 이를 0~1사이로 scaling
+        # 정규화
         label = label / 255.0
         inputs = inputs / 255.0
+
+        # 데이터 타입 설정
         label = label.astype(np.float32)
         inputs = inputs.astype(np.float32)
 
-        # 인풋 데이터 차원이 2이면, 채널 축을 추가해줘야한다.
-        # 파이토치 인풋은 (batch, 채널, 행, 열)
-
+        # (H, W) 형태에서 채널 축 추가 -> (H, W, C)
         if label.ndim == 2:
-            label = label[:, :, np.newaxis]
+            label = label[:, :, np.newaxis]  # (H, W) -> (H, W, 1)
         if inputs.ndim == 2:
-            inputs = inputs[:, :, np.newaxis]
+            inputs = inputs[:, :, np.newaxis]  # (H, W) -> (H, W, 1)
+
+        # transform 적용 (PIL 이미지 또는 numpy 배열을 처리할 수 있도록 설정)
+        if self.transform:
+            inputs = self.transform(inputs)  # ToTensor는 (H, W, C) -> (C, H, W) 자동 변경
+            label = self.transform(label)
 
         data = {'input': inputs, 'label': label}
-
-        if self.transform:
-            data = self.transform(data)
-        # transform에 할당된 class 들이 호출되면서 __call__ 함수 실행
-
         return data
+
+
 
 class ToTensor(object):
     def __call__(self, data):
