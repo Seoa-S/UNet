@@ -6,7 +6,7 @@ from torchvision import transforms
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-import wandb  # wandb import 추가
+import wandb
 import matplotlib.pyplot as plt
 from unet_modeling import UNet
 from dataset_preprocessing import Dataset
@@ -20,6 +20,7 @@ num_epoch = 100
 
 data_dir = '/Users/user/Desktop/UNet_segmentation/data'
 ckpt_dir = '/Users/user/Desktop/UNet_segmentation/checkpoint'
+test_dir = '/Users/user/Desktop/UNet_segmentation/data/test'
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -39,10 +40,12 @@ transform = transforms.Compose([
 # Dataset 정의
 dataset_train = Dataset(data_dir=os.path.join(data_dir, 'train'), transform=transform)
 dataset_val = Dataset(data_dir=os.path.join(data_dir, 'val'), transform=transform)
+dataset_test = Dataset(data_dir=test_dir, transform=transform)
 
 # DataLoader 정의
 loader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
 loader_val = DataLoader(dataset_val, batch_size=batch_size, shuffle=True)
+loader_test = DataLoader(dataset_test, batch_size=1, shuffle=False)
 
 # 네트워크 불러오기
 net = UNet().to(device)  # device : cpu or gpu
@@ -57,7 +60,7 @@ optim = torch.optim.Adam(net.parameters(), lr=lr)
 def save(ckpt_dir, net, optim, epoch):
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
-    torch.save({'net': net.state_dict(), 'optim': optim.state_dict()}, '%s/model_epoch%d.pth' % (ckpt_dir, epoch))
+    torch.save({'net': net.state_dict(), 'optim': optim.state_dict()}, f'{ckpt_dir}/model_epoch{epoch}.pth')
 
 # 네트워크 불러오기
 def load(ckpt_dir, net, optim):
@@ -67,7 +70,6 @@ def load(ckpt_dir, net, optim):
         return net, optim, 0  # 초기 에폭으로 반환
 
     ckpt_lst = os.listdir(ckpt_dir)
-
     if len(ckpt_lst) == 0:  # 체크포인트 파일이 없는 경우
         print(f"No checkpoint found in '{ckpt_dir}'. Starting from scratch.")
         return net, optim, 0
@@ -89,6 +91,11 @@ for epoch in range(start_epoch + 1, num_epoch + 1):
     net.train()
     loss_arr = []
 
+    # 에폭마다 시각화할 이미지를 저장할 리스트 초기화
+    input_images = []
+    true_masks = []
+    predicted_masks = []
+
     for batch, data in enumerate(loader_train, 1):
         label = data['label'].to(device)
         inputs = data['input'].to(device)
@@ -102,10 +109,8 @@ for epoch in range(start_epoch + 1, num_epoch + 1):
 
         loss_arr.append(loss.item())
 
-        # 첫 번째 배치에 대한 시각화
+        # 첫 번째 배치의 이미지를 저장
         if batch == 1:
-            print("here!")
-            # 원본 입력 이미지, 실제 레이블, 예측 마스크를 wandb에 기록
             input_image = inputs[0].cpu().detach().numpy().transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
             true_mask = label[0].cpu().detach().numpy().transpose(1, 2, 0)
             predicted_mask = torch.sigmoid(output[0]).cpu().detach().numpy().transpose(1, 2, 0)
@@ -114,16 +119,13 @@ for epoch in range(start_epoch + 1, num_epoch + 1):
             input_image = np.clip(input_image, 0, 1)
             predicted_mask = np.clip(predicted_mask, 0, 1)
 
-            # wandb에 이미지 로깅
-            wandb.log({
-                "Input Image": [wandb.Image(input_image, caption="Input Image")],
-                "True Mask": [wandb.Image(true_mask, caption="True Mask")],
-                "Predicted Mask": [wandb.Image(predicted_mask, caption="Predicted Mask")]
-            }, step=epoch)
+            # 이미지를 리스트에 추가
+            input_images.append(input_image)
+            true_masks.append(true_mask)
+            predicted_masks.append(predicted_mask)
 
     mean_loss = np.mean(loss_arr)
     print(f"Epoch {epoch} - Training Loss: {mean_loss}")
-    wandb.log({"Training Loss": mean_loss}, step=epoch)
 
     # Validation
     with torch.no_grad():
@@ -140,8 +142,17 @@ for epoch in range(start_epoch + 1, num_epoch + 1):
 
         mean_val_loss = np.mean(val_loss_arr)
         print(f"Epoch {epoch} - Validation Loss: {mean_val_loss}")
-        wandb.log({"Validation Loss": mean_val_loss}, step=epoch)
+
+    # 에폭이 끝날 때 wandb에 한 번 로그 기록
+    wandb.log({
+        "Training Loss": mean_loss,
+        "Validation Loss": mean_val_loss,
+        "Input Image": [wandb.Image(img, caption="Input Image") for img in input_images],
+        "True Mask": [wandb.Image(mask, caption="True Mask") for mask in true_masks],
+        "Predicted Mask": [wandb.Image(mask, caption="Predicted Mask") for mask in predicted_masks]
+    }, step=epoch)
 
     save(ckpt_dir=ckpt_dir, net=net, optim=optim, epoch=epoch)
 
 wandb.finish()
+print("done!")
