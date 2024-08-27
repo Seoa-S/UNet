@@ -82,6 +82,17 @@ def load(ckpt_dir, net, optim):
 
     return net, optim, epoch
 
+# 성능 평가
+def dice_coefficient(pred, target, smooth=1e-6):
+    pred = pred.contiguous().view(-1)
+    target = target.contiguous().view(-1)
+
+    intersection = (pred * target).sum()
+    dice = (2. * intersection + smooth) / (pred.sum() + target.sum() + smooth)
+
+    return dice
+
+
 # 네트워크 학습시키기
 start_epoch = 0
 net, optim, start_epoch = load(ckpt_dir=ckpt_dir, net=net, optim=optim)
