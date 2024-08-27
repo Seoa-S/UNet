@@ -1,0 +1,5 @@
+[default]
+entity = seoah-ewha-womans-university
+project = UNet
+base_url = https://api.wandb.ai
+

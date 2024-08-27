@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import wandb  # wandb import 추가
+import matplotlib.pyplot as plt
 from unet_modeling import UNet
 from dataset_preprocessing import Dataset
 
@@ -27,7 +28,7 @@ wandb.config.update({
     "learning_rate": lr,
     "batch_size": batch_size,
     "num_epoch": num_epoch
-})
+}, allow_val_change=True)
 
 # transform 적용해서 데이터 셋 불러오기
 transform = transforms.Compose([
@@ -35,7 +36,7 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.5], std=[0.5])  # 정규화
 ])
 
-# Dataset 정의: __getitem__ 메서드가 수정된 Dataset 클래스 사용
+# Dataset 정의
 dataset_train = Dataset(data_dir=os.path.join(data_dir, 'train'), transform=transform)
 dataset_val = Dataset(data_dir=os.path.join(data_dir, 'val'), transform=transform)
 
@@ -85,47 +86,61 @@ start_epoch = 0
 net, optim, start_epoch = load(ckpt_dir=ckpt_dir, net=net, optim=optim)
 
 for epoch in range(start_epoch + 1, num_epoch + 1):
-    net.train()  # 모델을 학습 모드로 전환
-    loss_arr = []  # 각 에폭의 손실 값을 저장할 리스트
+    net.train()
+    loss_arr = []
 
     for batch, data in enumerate(loader_train, 1):
         label = data['label'].to(device)
         inputs = data['input'].to(device)
 
-        # 모델 출력
         output = net(inputs)
 
-        # 손실 계산
-        optim.zero_grad()  # 옵티마이저의 그라디언트를 초기화
-        loss = fn_loss(output, label)  # 손실 계산
-        loss.backward()  # 역전파를 통해 그라디언트를 계산
-        optim.step()  # 옵티마이저를 통해 모델 파라미터 업데이트
+        optim.zero_grad()
+        loss = fn_loss(output, label)
+        loss.backward()
+        optim.step()
 
-        loss_arr.append(loss.item())  # 손실 값을 리스트에 추가
+        loss_arr.append(loss.item())
 
-    # 에폭이 끝날 때 평균 손실 값 출력 및 wandb 로그
+        # 첫 번째 배치에 대한 시각화
+        if batch == 1:
+            # 원본 입력 이미지, 실제 레이블, 예측 마스크를 wandb에 기록
+            input_image = inputs[0].cpu().detach().numpy().transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+            true_mask = label[0].cpu().detach().numpy().transpose(1, 2, 0)
+            predicted_mask = torch.sigmoid(output[0]).cpu().detach().numpy().transpose(1, 2, 0)
+
+            # 시각화를 위해 0-1 범위로 클리핑
+            input_image = np.clip(input_image, 0, 1)
+            predicted_mask = np.clip(predicted_mask, 0, 1)
+
+            # wandb에 이미지 로깅
+            wandb.log({
+                "Input Image": [wandb.Image(input_image, caption="Input Image")],
+                "True Mask": [wandb.Image(true_mask, caption="True Mask")],
+                "Predicted Mask": [wandb.Image(predicted_mask, caption="Predicted Mask")]
+            }, step=epoch)
+
     mean_loss = np.mean(loss_arr)
     print(f"Epoch {epoch} - Training Loss: {mean_loss}")
-    wandb.log({"Training Loss": mean_loss}, step=epoch)  # wandb에 로그 기록
+    wandb.log({"Training Loss": mean_loss}, step=epoch)
 
     # Validation
-    with torch.no_grad():  # 검증 중에는 그라디언트를 계산하지 않음
-        net.eval()  # 모델을 평가 모드로 전환
-        val_loss_arr = []  # 검증 손실 값을 저장할 리스트
+    with torch.no_grad():
+        net.eval()
+        val_loss_arr = []
 
         for batch, data in enumerate(loader_val, 1):
             label = data['label'].to(device)
             inputs = data['input'].to(device)
             output = net(inputs)
 
-            loss = fn_loss(output, label)  # 검증 손실 계산
-            val_loss_arr.append(loss.item())  # 검증 손실 값을 리스트에 추가
+            loss = fn_loss(output, label)
+            val_loss_arr.append(loss.item())
 
         mean_val_loss = np.mean(val_loss_arr)
         print(f"Epoch {epoch} - Validation Loss: {mean_val_loss}")
-        wandb.log({"Validation Loss": mean_val_loss}, step=epoch)  # wandb에 로그 기록
+        wandb.log({"Validation Loss": mean_val_loss}, step=epoch)
 
-    # 체크포인트 저장
     save(ckpt_dir=ckpt_dir, net=net, optim=optim, epoch=epoch)
 
-wandb.finish()  # wandb 세션 종료
+wandb.finish()
