@@ -6,9 +6,12 @@ from torchvision import transforms
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+import wandb  # wandb import 추가
 from unet_modeling import UNet
 from dataset_preprocessing import Dataset
+
+# wandb 초기화
+wandb.init(project="UNet_segmentation")
 
 lr = 1e-3  # learning rate
 batch_size = 4
@@ -16,9 +19,15 @@ num_epoch = 100
 
 data_dir = '/Users/user/Desktop/UNet_segmentation/data'
 ckpt_dir = '/Users/user/Desktop/UNet_segmentation/checkpoint'
-log_dir = '/Users/user/Desktop/UNet_segmentation/log'
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# wandb 설정
+wandb.config.update({
+    "learning_rate": lr,
+    "batch_size": batch_size,
+    "num_epoch": num_epoch
+})
 
 # transform 적용해서 데이터 셋 불러오기
 transform = transforms.Compose([
@@ -30,32 +39,9 @@ transform = transforms.Compose([
 dataset_train = Dataset(data_dir=os.path.join(data_dir, 'train'), transform=transform)
 dataset_val = Dataset(data_dir=os.path.join(data_dir, 'val'), transform=transform)
 
-# CustomDataset 클래스의 인스턴스 생성
-dataset = Dataset(data_dir=os.path.join(data_dir, 'train'), transform=transform)
-
-# 인덱스 0의 데이터 샘플 가져오기
-sample = dataset[0]
-# print(sample)
-
-# 데이터 형태 출력
-# print("Sample input shape:", sample['input'].shape)  # 예: (1, 512, 512)
-# print("Sample label shape:", sample['label'].shape)  # 예: (1, 512, 512)
-
 # DataLoader 정의
 loader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
 loader_val = DataLoader(dataset_val, batch_size=batch_size, shuffle=True)
-
-# 데이터 로드 확인
-data_iter = iter(loader_train)
-sample_batch = next(data_iter)
-
-input_image = sample_batch['input']
-label_image = sample_batch['label']
-#
-# print("After Transform - Input shape:", input_image.shape)  # 예상: torch.Size([4, 1, 512, 512])
-# print("After Transform - Label shape:", label_image.shape)  # 예상: torch.Size([4, 1, 512, 512])
-# print("After Transform - Input dtype:", input_image.dtype)  # 예상: torch.float32
-# print("After Transform - Label dtype:", label_image.dtype)  # 예상: torch.float32
 
 # 네트워크 불러오기
 net = UNet().to(device)  # device : cpu or gpu
@@ -65,23 +51,6 @@ fn_loss = nn.BCEWithLogitsLoss().to(device)
 
 # Optimizer 정의
 optim = torch.optim.Adam(net.parameters(), lr=lr)
-
-# 데이터셋 크기 계산
-num_train = len(dataset_train)
-num_val = len(dataset_val)
-
-# 에폭 당 배치 수 계산
-num_train_for_epoch = np.ceil(num_train / batch_size)
-num_val_for_epoch = np.ceil(num_val / batch_size)
-
-# 기타 function 설정
-fn_tonumpy = lambda x: x.to('cpu').detach().numpy().transpose(0, 2, 3, 1)
-fn_denorm = lambda x, mean, std: (x * std) + mean
-fn_classifier = lambda x: 1.0 * (x > 0.5)
-
-# Tensorboard 설정
-writer_train = SummaryWriter(log_dir=os.path.join(log_dir, 'train'))
-writer_val = SummaryWriter(log_dir=os.path.join(log_dir, 'val'))
 
 # 네트워크 저장하기
 def save(ckpt_dir, net, optim, epoch):
@@ -103,7 +72,7 @@ def load(ckpt_dir, net, optim):
         return net, optim, 0
 
     ckpt_lst.sort(key=lambda f: int(''.join(filter(str.isdigit, f))))
-    dict_model = torch.load('%s/%s' % (ckpt_dir, ckpt_lst[-1]), weights_only=True)
+    dict_model = torch.load('%s/%s' % (ckpt_dir, ckpt_lst[-1]), map_location=device)
 
     net.load_state_dict(dict_model['net'])
     optim.load_state_dict(dict_model['optim'])
@@ -111,67 +80,52 @@ def load(ckpt_dir, net, optim):
 
     return net, optim, epoch
 
-
 # 네트워크 학습시키기
 start_epoch = 0
 net, optim, start_epoch = load(ckpt_dir=ckpt_dir, net=net, optim=optim)
 
 for epoch in range(start_epoch + 1, num_epoch + 1):
-    net.train()
-    loss_arr = []
+    net.train()  # 모델을 학습 모드로 전환
+    loss_arr = []  # 각 에폭의 손실 값을 저장할 리스트
 
     for batch, data in enumerate(loader_train, 1):
         label = data['label'].to(device)
         inputs = data['input'].to(device)
 
-        # 모델에 전달하기 전 데이터 모양 출력
-        # print(f"Epoch: {epoch}, Batch: {batch}")
-        # print(f"Input shape: {inputs.shape}, Label shape: {label.shape}")
-
+        # 모델 출력
         output = net(inputs)
 
-        # 첫 번째 배치에서만 출력 확인
-        # if batch == 1:
-        #     print(f"Model output (first batch): {output[0]}")  # 첫 번째 샘플 출력
+        # 손실 계산
+        optim.zero_grad()  # 옵티마이저의 그라디언트를 초기화
+        loss = fn_loss(output, label)  # 손실 계산
+        loss.backward()  # 역전파를 통해 그라디언트를 계산
+        optim.step()  # 옵티마이저를 통해 모델 파라미터 업데이트
 
-        optim.zero_grad()
-        loss = fn_loss(output, label)
-        loss.backward()
-        optim.step()
+        loss_arr.append(loss.item())  # 손실 값을 리스트에 추가
 
-        loss_arr += [loss.item()]
-
-        # 학습 중 손실 값 확인
-        if batch % 10 == 0:  # 매 10번째 배치마다 출력
-            print(f"Epoch {epoch}, Batch {batch} - Training Loss: {loss.item()}")
-
-    # 에폭이 끝날 때 평균 손실 값 출력
+    # 에폭이 끝날 때 평균 손실 값 출력 및 wandb 로그
     mean_loss = np.mean(loss_arr)
     print(f"Epoch {epoch} - Training Loss: {mean_loss}")
-    writer_train.add_scalar('Training Loss', mean_loss, epoch)  # TensorBoard에 기록
+    wandb.log({"Training Loss": mean_loss}, step=epoch)  # wandb에 로그 기록
 
-    # validation
-    with torch.no_grad():
-        net.eval()
-        val_loss_arr = []
+    # Validation
+    with torch.no_grad():  # 검증 중에는 그라디언트를 계산하지 않음
+        net.eval()  # 모델을 평가 모드로 전환
+        val_loss_arr = []  # 검증 손실 값을 저장할 리스트
 
         for batch, data in enumerate(loader_val, 1):
             label = data['label'].to(device)
             inputs = data['input'].to(device)
             output = net(inputs)
 
-            loss = fn_loss(output, label)
+            loss = fn_loss(output, label)  # 검증 손실 계산
             val_loss_arr.append(loss.item())  # 검증 손실 값을 리스트에 추가
-
-            # print('valid : epoch %04d / %04d | Batch %04d \ %04d | Loss %04f' % (
-            #     epoch, num_epoch, batch, num_val_for_epoch, np.mean(loss_arr)))
 
         mean_val_loss = np.mean(val_loss_arr)
         print(f"Epoch {epoch} - Validation Loss: {mean_val_loss}")
-        writer_val.add_scalar('Validation Loss', mean_val_loss, epoch)  # TensorBoard에 기록
+        wandb.log({"Validation Loss": mean_val_loss}, step=epoch)  # wandb에 로그 기록
 
     # 체크포인트 저장
     save(ckpt_dir=ckpt_dir, net=net, optim=optim, epoch=epoch)
 
-writer_train.close()
-writer_val.close()
+wandb.finish()  # wandb 세션 종료
