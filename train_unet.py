@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import wandb
-import matplotlib.pyplot as plt
 from unet_modeling import UNet
 from dataset_preprocessing import Dataset
 
@@ -153,6 +152,39 @@ for epoch in range(start_epoch + 1, num_epoch + 1):
     }, step=epoch)
 
     save(ckpt_dir=ckpt_dir, net=net, optim=optim, epoch=epoch)
+
+print("Evaluating on test set...")
+net.eval()
+with torch.no_grad():
+    test_input_images = []
+    test_true_masks = []
+    test_predicted_masks = []
+
+    for batch, data in enumerate(loader_test, 1):
+        label = data['label'].to(device)
+        inputs = data['input'].to(device)
+        output = net(inputs)
+
+        input_image = inputs[0].cpu().detach().numpy().transpose(1, 2, 0)
+        true_mask = label[0].cpu().detach().numpy().transpose(1, 2, 0)
+        predicted_mask = torch.sigmoid(output[0]).cpu().detach().numpy().transpose(1, 2, 0)
+
+        # 시각화를 위해 0-1 범위로 클리핑
+        input_image = np.clip(input_image, 0, 1)
+        predicted_mask = np.clip(predicted_mask, 0, 1)
+
+        # 테스트 이미지 저장
+        test_input_images.append(input_image)
+        test_true_masks.append(true_mask)
+        test_predicted_masks.append(predicted_mask)
+
+    # 테스트 결과 wandb에 기록
+    wandb.log({
+        "Test Input Image": [wandb.Image(img, caption="Test Input Image") for img in test_input_images],
+        "Test True Mask": [wandb.Image(mask, caption="Test True Mask") for mask in test_true_masks],
+        "Test Predicted Mask": [wandb.Image(mask, caption="Test Predicted Mask") for mask in test_predicted_masks]
+    })
+
 
 wandb.finish()
 print("done!")

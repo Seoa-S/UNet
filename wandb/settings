@@ -1,5 +1,5 @@
 [default]
 entity = seoah-ewha-womans-university
-project = UNet_segmentation
+project = UNet
 base_url = https://api.wandb.ai
 
