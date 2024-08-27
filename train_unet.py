@@ -104,6 +104,7 @@ for epoch in range(start_epoch + 1, num_epoch + 1):
 
         # 첫 번째 배치에 대한 시각화
         if batch == 1:
+            print("here!")
             # 원본 입력 이미지, 실제 레이블, 예측 마스크를 wandb에 기록
             input_image = inputs[0].cpu().detach().numpy().transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
             true_mask = label[0].cpu().detach().numpy().transpose(1, 2, 0)
